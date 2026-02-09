@@ -1,73 +1,77 @@
 #!/bin/bash
-set -euo pipefail
 
 USERID=$(id -u)
-
 LOGS_FOLDER="/var/log/shell-script"
-LOGS_FILE="$LOGS_FOLDER/backup.log"
-
+LOGS_FILE="/var/log/shell-script/backup.log"
 R="\e[31m"
 G="\e[32m"
 Y="\e[33m"
 N="\e[0m"
+SOURCE_DIR=$1
+DEST_DIR=$2
+DAYS=${3:-14} # 14 days is the default value, if the user not supplied
 
-SOURCE_DIR=${1:-}
-DEST_DIR=${2:-}
-DAYS=${3:-14}
-
-mkdir -p "$LOGS_FOLDER"
-
-log() {
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') | $1" | tee -a "$LOGS_FILE"
+log(){
+    echo -e "$(date "+%Y-%m-%d %H:%M:%S") | $1" | tee -a $LOGS_FILE
 }
 
-USAGE() {
-    log "$R USAGE:: sudo backup <SOURCE_DIR> <DEST_DIR> [DAYS(default 14)] $N"
-    exit 1
-}
-
-# Root check
-if [ "$USERID" -ne 0 ]; then
-    echo -e "$R Please run this script with root access $N"
+if [ $USERID -ne 0 ]; then
+    echo -e "$R Please run this script with root user access $N"
     exit 1
 fi
 
-# Argument check
-[ -z "$SOURCE_DIR" ] || [ -z "$DEST_DIR" ] && USAGE
+mkdir -p $LOGS_FOLDER
 
-# Directory checks
-[ ! -d "$SOURCE_DIR" ] && log "$R Source dir not found $N" && exit 1
-[ ! -d "$DEST_DIR" ] && log "$R Destination dir not found $N" && exit 1
+USAGE(){
+    log "$R USAGE:: sudo backup <SOURCE_DIR> <DEST_DIR> <DAYS>[default 14 days] $N"
+    exit 1
+}
+
+
+if [ $# -lt 2 ]; then
+    USAGE
+fi
+
+if [ ! -d "$SOURCE_DIR" ]; then
+    log "$R Source Directory: $SOURCE_DIR does not exist $N"
+    exit 1
+fi
+
+if [ ! -d "$DEST_DIR" ]; then
+    log "$R Destination Directory:  $DEST_DIR does not exist $N"
+    exit 1
+fi
+
+### Find the files
+FILES=$(find "$SOURCE_DIR" -name "*.log" -type f -mtime +$DAYS)
 
 log "Backup started"
-log "Source: $SOURCE_DIR"
-log "Destination: $DEST_DIR"
+log "Source Directory: $SOURCE_DIR"
+log "Destination Directory: $DEST_DIR"
 log "Days: $DAYS"
 
-TIMESTAMP=$(date +%F-%H-%M-%S)
-ARCHIVE="$DEST_DIR/app-logs-$TIMESTAMP.tar.gz"
-
-FILES_FOUND=$(find "$SOURCE_DIR" -type f -name "*.log" -mtime +"$DAYS")
-
-if [ -z "$FILES_FOUND" ]; then
-    log "$Y No files to archive. Skipping $N"
-    exit 0
-fi
-
-log "Files found for archive"
-
-# Create archive safely
-find "$SOURCE_DIR" -type f -name "*.log" -mtime +"$DAYS" -print0 \
-| tar --null -czvf "$ARCHIVE" --files-from=-
-
-if [ -f "$ARCHIVE" ]; then
-    log "$G Archival SUCCESS $N"
-
-    while IFS= read -r file; do
-        log "Deleting $file"
-        rm -f "$file"
-    done <<< "$FILES_FOUND"
+if [ -z "${FILES}" ]; then
+    log "No files to archieve ... $Y Skipping $N"
 else
-    log "$R Archival FAILED $N"
-    exit 1
+    # app-logs-$timestamp.zip
+    log "Files found to archieve: $FILES"
+    TIMESTAMP=$(date +%F-%H-%M-%S)
+    ZIP_FILE_NAME="$DEST_DIR/app-logs-$TIMESTAMP.tar.gz"
+    log "Archieve name: $ZIP_FILE_NAME"
+    tar -zcvf $ZIP_FILE_NAME $(find $SOURCE_DIR -name "*.log" -type f -mtime +$DAYS)
+
+    # Check archieve is success or not
+    if [ -f $ZIP_FILE_NAME ]; then
+        log "Archeival is ... $G SUCCESS $N"
+
+        while IFS= read -r filepath; do
+        # Process each line here
+        log "Deleting file: $filepath"
+        rm -f $filepath
+        log "Deleted file: $filepath"
+        done <<< $FILES
+    else
+        log "Archeival is ... $R FAILURE $N"
+        exit 1
+    fi
 fi
